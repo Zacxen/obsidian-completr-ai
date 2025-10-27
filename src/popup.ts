@@ -1,7 +1,6 @@
 import { Suggestion, SuggestionProvider } from "./provider/provider";
 import { Latex } from "./provider/latex_provider";
-import { WordList } from "./provider/word_list_provider";
-import { FileScanner } from "./provider/scanner_provider";
+import { LLMProvider } from "./provider/llm_provider";
 import {
     App,
     Editor,
@@ -14,12 +13,10 @@ import {
 } from "obsidian";
 import SnippetManager from "./snippet_manager";
 import { CompletrSettings } from "./settings";
-import { FrontMatter } from "./provider/front_matter_provider";
 import {matchWordBackwards} from "./editor_helpers";
 import { SuggestionBlacklist } from "./provider/blacklist";
-import { Callout } from "./provider/callout_provider";
 
-const PROVIDERS: SuggestionProvider[] = [FrontMatter, Callout, Latex, FileScanner, WordList];
+const PROVIDERS: SuggestionProvider[] = [Latex, LLMProvider];
 
 export default class SuggestionPopup extends EditorSuggest<Suggestion> {
     /**
@@ -62,16 +59,18 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
         this.focused = false;
     }
 
-    getSuggestions(
+    async getSuggestions(
         context: EditorSuggestContext
-    ): Suggestion[] | Promise<Suggestion[]> {
+    ): Promise<Suggestion[] | null> {
         let suggestions: Suggestion[] = [];
 
         for (let provider of PROVIDERS) {
-            suggestions = [...suggestions, ...provider.getSuggestions({
+            const providerSuggestions = await provider.getSuggestions({
                 ...context,
                 separatorChar: this.separatorChar
-            }, this.settings)];
+            }, this.settings);
+
+            suggestions = [...suggestions, ...providerSuggestions];
 
             if (provider.blocksAllOtherProviders && suggestions.length > 0) {
                 suggestions.forEach((suggestion) => {
@@ -150,6 +149,35 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
     }
 
     selectSuggestion(value: Suggestion, evt: MouseEvent | KeyboardEvent): void {
+        if (value.hasPartialText()) {
+            const nextChunk = value.consumeNextPartialChunk();
+            if (!nextChunk) {
+                this.close();
+                this.justClosed = true;
+                return;
+            }
+
+            const insertionPoint = this.context.end;
+            this.context.editor.replaceRange(nextChunk, insertionPoint, insertionPoint);
+
+            const newCursor = {
+                ...insertionPoint,
+                ch: insertionPoint.ch + nextChunk.length,
+            };
+            this.context.editor.setCursor(newCursor);
+            this.context.start = newCursor;
+            this.context.end = newCursor;
+
+            if (value.hasPartialRemaining()) {
+                value.displayName = value.getPartialRemaining();
+            } else {
+                this.close();
+                this.justClosed = true;
+            }
+
+            return;
+        }
+
         const replacement = value.replacement;
         const start = typeof value !== "string" && value.overrideStart ? value.overrideStart : this.context.start;
 
