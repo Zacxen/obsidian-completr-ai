@@ -175,6 +175,8 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
                 this.justClosed = true;
             }
 
+            LLMProvider.notifySuggestionAccepted();
+
             return;
         }
 

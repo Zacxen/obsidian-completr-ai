@@ -24,11 +24,16 @@ interface LLMResponse {
 }
 
 class LLMCompletionProvider implements SuggestionProvider {
+    private static readonly ACCEPTANCE_DELAY_MS = 200;
+
     private lastSuccessfulRequestKey: string | null = null;
     private cachedSuggestions: Suggestion[] = [];
     private inFlightPromise: Promise<Suggestion[]> | null = null;
     private queuedRequest: PendingRequest | null = null;
     private queuePromise: Promise<Suggestion[]> | null = null;
+    private nextAllowedRequestTime = 0;
+    private acceptanceDelayPromise: Promise<void> | null = null;
+    private acceptanceDelayTimeout: number | null = null;
 
     async getSuggestions(context: SuggestionContext, settings: CompletrSettings): Promise<Suggestion[]> {
         if (!settings.llmProviderEnabled)
@@ -87,8 +92,22 @@ class LLMCompletionProvider implements SuggestionProvider {
         return this.queuePromise;
     }
 
+    notifySuggestionAccepted(): void {
+        this.nextAllowedRequestTime = Date.now() + LLMCompletionProvider.ACCEPTANCE_DELAY_MS;
+        if (this.acceptanceDelayTimeout !== null) {
+            window.clearTimeout(this.acceptanceDelayTimeout);
+            this.acceptanceDelayTimeout = null;
+        }
+        this.acceptanceDelayPromise = null;
+    }
+
     private startRequest(request: PendingRequest): Promise<Suggestion[]> {
-        const fetchPromise = this.fetchSuggestions(request);
+        const delayPromise = this.getAcceptanceDelayPromise();
+        const fetchPromise = (async () => {
+            if (delayPromise)
+                await delayPromise;
+            return this.fetchSuggestions(request);
+        })();
         const finalPromise = fetchPromise.finally(() => {
             if (this.inFlightPromise === finalPromise)
                 this.inFlightPromise = null;
@@ -96,6 +115,29 @@ class LLMCompletionProvider implements SuggestionProvider {
 
         this.inFlightPromise = finalPromise;
         return finalPromise;
+    }
+
+    private getAcceptanceDelayPromise(): Promise<void> | null {
+        const waitMs = this.nextAllowedRequestTime - Date.now();
+        if (waitMs <= 0)
+            return null;
+
+        if (!this.acceptanceDelayPromise) {
+            const promise = new Promise<void>((resolve) => {
+                const timeout = window.setTimeout(() => {
+                    if (this.acceptanceDelayTimeout === timeout)
+                        this.acceptanceDelayTimeout = null;
+                    if (this.acceptanceDelayPromise === promise)
+                        this.acceptanceDelayPromise = null;
+                    resolve();
+                }, waitMs);
+                this.acceptanceDelayTimeout = timeout;
+            });
+
+            this.acceptanceDelayPromise = promise;
+        }
+
+        return this.acceptanceDelayPromise;
     }
 
     private getPromptUpToCursor(context: SuggestionContext, cursor: EditorPosition): string {
