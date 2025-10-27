@@ -55,17 +55,30 @@ class LLMCompletionProvider implements SuggestionProvider {
 
     private async fetchSuggestions(prompt: string, settings: CompletrSettings): Promise<Suggestion[]> {
         try {
+            const payload = {
+                prompt: prompt,
+                max_tokens: settings.llmMaxTokens,
+                temperature: settings.llmTemperature,
+            };
+
+            console.log("LLM provider sending request", {
+                url: settings.llmCompletionsUrl,
+                payload,
+            });
+
             const response = await requestUrl({
                 url: settings.llmCompletionsUrl,
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({
-                    prompt: prompt,
-                    max_tokens: settings.llmMaxTokens,
-                    temperature: settings.llmTemperature,
-                }),
+                body: JSON.stringify(payload),
+            });
+
+            console.log("LLM provider received response", {
+                status: response.status,
+                headers: response.headers,
+                text: response.text,
             });
 
             const data: LLMResponse = typeof response.json === "object" ? response.json : JSON.parse(response.text);
