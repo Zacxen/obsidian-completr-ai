@@ -37,7 +37,7 @@ class LLMCompletionProvider implements SuggestionProvider {
         if (!settings.llmCompletionsUrl)
             return [];
 
-        const cursorPosition = context.start ?? context.editor.getCursor();
+        const cursorPosition = context.editor.getCursor();
         const prompt = this.getPromptUpToCursor(context, cursorPosition);
         if (!prompt?.trim())
             return [];
