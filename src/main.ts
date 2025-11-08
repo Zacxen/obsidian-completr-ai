@@ -1,16 +1,12 @@
-import { EditorPosition, KeymapContext, MarkdownView, Plugin, TFile, } from "obsidian";
+import { EditorPosition, KeymapContext, MarkdownView, Plugin } from "obsidian";
 import SnippetManager from "./snippet_manager";
 import SuggestionPopup, { SelectionDirection } from "./popup";
 import { CompletrSettings, DEFAULT_SETTINGS } from "./settings";
-import { WordList } from "./provider/word_list_provider";
-import { FileScanner } from "./provider/scanner_provider";
 import CompletrSettingsTab from "./settings_tab";
 import { EditorView, ViewUpdate } from "@codemirror/view";
 import { editorToCodeMirrorState, posFromIndex } from "./editor_helpers";
 import { markerStateField } from "./marker_state_field";
-import { FrontMatter } from "./provider/front_matter_provider";
 import { Latex } from "./provider/latex_provider";
-import { Callout } from "./provider/callout_provider";
 import { SuggestionBlacklist } from "./provider/blacklist";
 import PeriodInserter from "./period_inserter";
 
@@ -30,10 +26,6 @@ export default class CompletrPlugin extends Plugin {
         this._periodInserter = new PeriodInserter();
 
         this.registerEditorSuggest(this._suggestionPopup);
-
-        this.registerEvent(this.app.workspace.on('file-open', this.onFileOpened, this));
-        this.registerEvent(this.app.metadataCache.on('changed', FrontMatter.onCacheChange, FrontMatter));
-        this.app.workspace.onLayoutReady(() => FrontMatter.loadYAMLKeyCompletions(this.app.metadataCache, this.app.vault.getMarkdownFiles()));
 
         this.registerEditorExtension(markerStateField);
         this.registerEditorExtension(EditorView.updateListener.of(new CursorActivityListener(this.snippetManager, this._suggestionPopup, this._periodInserter).listener));
@@ -217,24 +209,6 @@ export default class CompletrPlugin extends Plugin {
             isVisible: () => this._suggestionPopup.isVisible(),
         });
         this.addCommand({
-            id: 'completr-blacklist-current-word',
-            name: 'Add the currently selected word to the blacklist',
-            hotkeys: [
-                {
-                    key: "D",
-                    modifiers: ["Shift"]
-                }
-            ],
-            editorCallback: (editor) => {
-                SuggestionBlacklist.add(this._suggestionPopup.getSelectedItem());
-                SuggestionBlacklist.saveData(this.app.vault);
-                (this._suggestionPopup as any).trigger(editor, this.app.workspace.getActiveFile(), true);
-            },
-            // @ts-ignore
-            isBypassCommand: () => !this._suggestionPopup.isFocused(),
-            isVisible: () => this._suggestionPopup.isVisible(),
-        });
-        this.addCommand({
             id: 'completr-close-suggestion-popup',
             name: 'Close suggestion popup',
             hotkeys: [
@@ -353,17 +327,13 @@ export default class CompletrPlugin extends Plugin {
 
     async onunload() {
         this.snippetManager.onunload();
-        await FileScanner.saveData(this.app.vault);
     }
 
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
         SuggestionBlacklist.loadData(this.app.vault).then(() => {
-            WordList.loadFromFiles(this.app.vault, this.settings);
-            FileScanner.loadData(this.app.vault);
             Latex.loadCommands(this.app.vault);
-            Callout.loadSuggestions(this.app.vault, this);
         });
     }
 
@@ -375,12 +345,6 @@ export default class CompletrPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
-    private readonly onFileOpened = (file: TFile) => {
-        if (!this.settings.fileScannerProviderEnabled || !this.settings.fileScannerScanCurrent || !file)
-            return;
-
-        FileScanner.scanFile(this.settings, file, true);
-    }
 }
 
 class CursorActivityListener {
